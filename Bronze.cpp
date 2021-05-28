@@ -8,14 +8,23 @@ using namespace std;
 
 #define PI 3.141592f
 
-#define MAP_RADIUS_CHECKPOINT 600.0f
 #define MAP_WIDTH 16000.0f
 #define MAP_HEIGHT 9000.0f
 
-#define BOOST_THRESHOLD_DISTANCE 1500.0f
+#define CHECKPOINT_RADIUS 600.0f
+
+#define POD_MAXIMUM_THRUST 100
+#define POD_COLLIDER_SIZE 400.0f
+
+#define BOOST_THRESHOLD_DISTANCE_TO_CHECKPOINT 1500.0f
+#define BOOST_THRESHOLD_DISTANCE_TO_OPPONENT 600.0f
 #define BOOST_THRESHOLD_DOT_OPPONENT 0.90f
 #define BOOST_THRESHOLD_ANGLE 1.0f
 #define BOOST_KEYWORD "BOOST"
+
+#define THRUST_ANGLE_BEFORE_TURNING 80.0f 
+#define THRUST_DISTANCE_BEFORE_BRAKING 1200.0f
+#define THRUST_MINIMUM_BRACKING_MULTIPLIER 0.5f
 
 #define FLOAT_COMPARE(_a, _b) (fabs(_a - _b) < 0.000001f)
 #define DEG_TO_RAD(angleDeg) (angleDeg * PI / 180.0f)
@@ -26,6 +35,7 @@ using namespace std;
 class Vector2
 {
 public:
+
 	static const Vector2 Zero;
 	static const Vector2 Up;
 	static const Vector2 Right;
@@ -54,6 +64,8 @@ public:
 	inline Vector2 operator-() const;
 	inline Vector2 operator+ (const Vector2& _v) const;
 	inline Vector2 operator- (const Vector2& _v) const;
+	inline Vector2 operator* (float _multiplier) const;
+	inline Vector2 operator/ (float _divider) const;
 
 	friend ostream& operator<< (ostream& _o, const Vector2& _v);
 };
@@ -151,6 +163,19 @@ Vector2 Vector2::operator-(const Vector2& _v) const
 	newVec -= _v;
 	return newVec;
 }
+Vector2 Vector2::operator*(float _multiplier) const
+{
+	Vector2 newVec = Vector2(*this);
+	newVec *= _multiplier;
+	return newVec;
+}
+
+Vector2 Vector2::operator/(float _divider) const
+{
+	Vector2 newVec = Vector2(*this);
+	newVec /= _divider;
+	return newVec;
+}
 
 ostream& operator<<(ostream& _output, const Vector2& _v)
 {
@@ -162,13 +187,15 @@ ostream& operator<<(ostream& _output, const Vector2& _v)
 
 #pragma region Checkpoint
 
-struct Checkpoint
+class Checkpoint
 {
 public:
+
 	Vector2 m_position = Vector2::Zero; // position of the next check point
-	int m_distance = 0; // distance to the next checkpoint
-	int m_angle = 0; // angle in degres (from -180 to 180) between your pod orientation and the direction of the next checkpoint
+	float m_distance = 0.0f; // distance to the next checkpoint
+	float m_angle = 0.0f; // angle in degres (from -180 to 180) between your pod orientation and the direction of the next checkpoint
 };
+
 
 #pragma endregion
 
@@ -177,18 +204,19 @@ public:
 class Pod
 {
 public:
-	virtual void UpdateInput();
+
+	virtual void ReceiveInput();
 	virtual void UpdateDebug() {};
 
 	inline Vector2 GetPosition() const { return m_position; }
 
 protected:
+
 	Vector2 m_position = Vector2::Zero;
-	int m_thrust = 100;
 	bool m_canUseBoost = true;
 };
 
-void Pod::UpdateInput()
+void Pod::ReceiveInput()
 {
 	cin >> m_position.m_x >> m_position.m_y;
 	cin.ignore();
@@ -201,21 +229,37 @@ void Pod::UpdateInput()
 class PlayerPod : public Pod
 {
 public:
-	void UpdateInput() override;
-	void UpdateDebug() override;
-	void UpdateValues(const Pod& _opponent);
-	void UpdateOutput();
+
+	void ReceiveInput() override;
+
+	void UpdateOpponentInteraction(const Pod& _opponent);
+	void UpdateThrust();
+	void UpdateSpeed();
+	void UpdateNextCheckpoint();
+	void UpdateTarget();
+	void UpdateHoverText();
+
+	void SendOutput();
 
 private:
-	int ComputeThrust();
+
 	bool CheckShouldBoost();
 
 	Checkpoint m_nextCheckpoint;
+	int m_thrust = POD_MAXIMUM_THRUST;
+	Vector2 m_playerToTarget = Vector2::Zero;
+	Vector2 m_playerToOpponent = Vector2::Zero;
+	float m_dotOpponentPlayer = 0.0f;
+	string m_hoverText = "";
+	Vector2 m_lastPosition = Vector2::Zero;
+	Vector2 m_speed = Vector2::Zero;
+	Vector2 m_target = Vector2::Zero;
 
-	float dotOpponentPlayer = 0.0f;
+	bool m_isTurning = false;
+	bool m_isBraking = false;
 };
 
-void PlayerPod::UpdateInput()
+void PlayerPod::ReceiveInput()
 {
 	cin >> m_position.m_x >> m_position.m_y >>
 		m_nextCheckpoint.m_position.m_x >> m_nextCheckpoint.m_position.m_y >>
@@ -223,63 +267,122 @@ void PlayerPod::UpdateInput()
 	cin.ignore();
 }
 
-void PlayerPod::UpdateValues(const Pod& _opponent)
+void PlayerPod::UpdateThrust()
+{
+	float newThrust = POD_MAXIMUM_THRUST;
+
+	float turningMultiplier = 1.0f;
+	bool isTurning = false;
+
+	float brakingMultiplier = 1.0f;
+	bool isBraking = false;
+
+	// Slow down when the player is turning to the next checkpoint
+	turningMultiplier = (1.0f - m_nextCheckpoint.m_angle / THRUST_ANGLE_BEFORE_TURNING);
+	turningMultiplier = clamp(turningMultiplier, 0.0f, 1.0f);
+	cerr << "Turning Multiplier : " << turningMultiplier << endl;
+	m_isTurning = turningMultiplier <= 0.80f;
+
+	// Slow down as the player get closer to the checkpoint.
+	brakingMultiplier = m_nextCheckpoint.m_distance / THRUST_DISTANCE_BEFORE_BRAKING;
+	brakingMultiplier = clamp(brakingMultiplier, THRUST_MINIMUM_BRACKING_MULTIPLIER, 1.0f);
+	cerr << "Braking Multiplier : " << brakingMultiplier << endl;
+	m_isBraking = brakingMultiplier <= 0.80f;
+
+	m_thrust = newThrust * turningMultiplier * brakingMultiplier;
+	cerr << "Thrust : " << m_thrust << endl;
+}
+
+void PlayerPod::UpdateSpeed()
+{
+	m_speed = m_position - m_lastPosition;
+	m_lastPosition = m_position;
+	cerr << "Speed : " << "x:" << m_speed.m_x << "y:" << m_speed.m_y << endl;
+}
+
+void PlayerPod::UpdateNextCheckpoint()
+{
+	cerr << "Angle to checkpoint : " << m_nextCheckpoint.m_angle << endl;
+	cerr << "Distance to checkpoint : " << m_nextCheckpoint.m_distance << endl;
+	m_nextCheckpoint.m_angle = abs(m_nextCheckpoint.m_angle);
+}
+
+void PlayerPod::UpdateTarget()
+{
+	// Prevent the player from going in the wrong direction at the start
+	static bool isFirstFrame = true;
+	if (isFirstFrame)
+	{
+		isFirstFrame = false;
+		m_target = m_nextCheckpoint.m_position;
+		return;
+	}
+
+	// Create an offset to the checkpoint position, taking into account of the player speed
+	Vector2 offset = m_speed * -3.0f;
+	m_target = m_nextCheckpoint.m_position + offset;
+}
+
+void PlayerPod::UpdateHoverText()
+{
+	if (m_isBraking && m_isTurning)
+	{
+		m_hoverText = "TURNING & BRAKING";
+	}
+	else if (m_isBraking)
+	{
+		m_hoverText = "BRAKING";
+	}
+	else if (m_isTurning)
+	{
+		m_hoverText = "TURNING";
+	}
+	else
+	{
+		m_hoverText = "ACCELERATING";
+	}
+}
+
+void PlayerPod::UpdateOpponentInteraction(const Pod& _opponent)
 {
 	// Calculate the dot product of the opponent and the player
-	Vector2 playerToCheckpoint = (m_nextCheckpoint.m_position - m_position).Normalized();
-	Vector2 playerToOpponent = (_opponent.GetPosition() - m_position).Normalized();
-	dotOpponentPlayer = Vector2::Dot(playerToCheckpoint, playerToOpponent);
+	m_playerToTarget = m_target - m_position;
+	m_playerToOpponent = _opponent.GetPosition() - m_position;
+	m_dotOpponentPlayer = Vector2::Dot(m_playerToTarget.Normalized(), m_playerToOpponent.Normalized());
+	cerr << "Dot between opponent and player : " << m_dotOpponentPlayer << endl;
 }
 
-void PlayerPod::UpdateDebug()
-{
-	cerr << "Thrust : " << m_thrust << endl;
-	cerr << "Can use boost : " << m_canUseBoost << endl;
-	cerr << "Distance to checkpoint : " << m_nextCheckpoint.m_distance << endl;
-	cerr << "Angle to checkpoint : " << m_nextCheckpoint.m_angle << endl;
-	cerr << "Dot between opponent and player : " << dotOpponentPlayer << endl;
-}
-
-void PlayerPod::UpdateOutput()
+void PlayerPod::SendOutput()
 {
 	if (CheckShouldBoost() == true)
 	{
-		cout << m_nextCheckpoint.m_position << " " << BOOST_KEYWORD << endl;
+		cout << m_target << " " << BOOST_KEYWORD << " " << m_hoverText << endl;
 	}
 	else
 	{
-		m_thrust = ComputeThrust();
-		cout << m_nextCheckpoint.m_position << " " << m_thrust << endl;
+		cout << m_target << " " << m_thrust << " " << m_hoverText << endl;
 	}
-}
-
-int PlayerPod::ComputeThrust()
-{
-	int thrust = 100;
-
-	if (m_nextCheckpoint.m_angle > 90 or m_nextCheckpoint.m_angle < -90)
-	{
-		thrust = 0;
-	}
-	else
-	{
-		thrust = 100;
-	}
-	return thrust;
 }
 
 bool PlayerPod::CheckShouldBoost()
 {
 	if (false == m_canUseBoost) return false;
 
-	bool hasGoodAngle = abs(m_nextCheckpoint.m_angle) < BOOST_THRESHOLD_ANGLE;
-	if (false == hasGoodAngle) return false;
+	bool hasGoodAngleToCheckpoint = m_nextCheckpoint.m_angle < BOOST_THRESHOLD_ANGLE;
+	if (false == hasGoodAngleToCheckpoint) return false;
 
-	bool hasGoodDistance = m_nextCheckpoint.m_distance > BOOST_THRESHOLD_DISTANCE;
-	if (false == hasGoodDistance) return false;
+	bool hasGoodDistanceToCheckpoint = m_nextCheckpoint.m_distance > BOOST_THRESHOLD_DISTANCE_TO_CHECKPOINT;
+	if (false == hasGoodDistanceToCheckpoint) return false;
 
-	bool isInFrontOfOpponent = (dotOpponentPlayer > BOOST_THRESHOLD_DOT_OPPONENT);
-	if (isInFrontOfOpponent) return false;
+	bool isInFrontOfOpponent = (m_dotOpponentPlayer > BOOST_THRESHOLD_DOT_OPPONENT);
+	if (isInFrontOfOpponent)
+	{
+		bool hasGoodDistanceToOpponent = m_playerToOpponent.Magnitude() < BOOST_THRESHOLD_DISTANCE_TO_OPPONENT;
+		if (false == hasGoodDistanceToOpponent)
+		{
+			return false;
+		}
+	}
 
 	m_canUseBoost = false;
 	return true;
@@ -292,14 +395,19 @@ int main()
 	PlayerPod playerPod;
 	Pod opponent;
 
-	// Game loop
 	bool isRunning = true;
 	while (isRunning)
 	{
-		playerPod.UpdateInput();
-		opponent.UpdateInput();
-		playerPod.UpdateValues(opponent);
-		playerPod.UpdateDebug();
-		playerPod.UpdateOutput();
+		playerPod.ReceiveInput();
+		opponent.ReceiveInput();
+
+		playerPod.UpdateThrust();
+		playerPod.UpdateSpeed();
+		playerPod.UpdateNextCheckpoint();
+		playerPod.UpdateTarget();
+		playerPod.UpdateOpponentInteraction(opponent);
+		playerPod.UpdateHoverText();
+
+		playerPod.SendOutput();
 	}
 }
