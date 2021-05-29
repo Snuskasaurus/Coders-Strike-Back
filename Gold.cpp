@@ -24,7 +24,7 @@ using namespace std;
 #define BOOST_THRESHOLD_ANGLE 1.0f
 #define BOOST_KEYWORD "BOOST"
 
-#define THRUST_ANGLE_BEFORE_TURNING 80.0f 
+#define THRUST_ANGLE_BEFORE_TURNING 180.0f 
 #define THRUST_DISTANCE_BEFORE_BRAKING 1200.0f
 #define THRUST_MINIMUM_BRACKING_MULTIPLIER 0.5f
 
@@ -193,19 +193,40 @@ class Checkpoint
 {
 public:
 
+	static void CheckGreatestDistance(Checkpoint _checkpoints[], int _nbCheckpoints);
+
 	void ReceiveInput();
 	void CalculateValuesToNextCheckpoint(const Checkpoint& _nextCheckpoint);
 
+	bool m_haveGreatestDistance = false;
 	Vector2 m_position = Vector2::Zero; // Position of the next check point
+
+private:
+
 	float m_distanceToNextCheckpoint = 0.0f; // Distance to the next checkpoint
 };
+
+void Checkpoint::CheckGreatestDistance(Checkpoint _checkpoints[], int _nbCheckpoints)
+{
+	float greatestDistance = 0.0f;
+	Checkpoint* greatestDistanceCheckpoint = nullptr;
+
+	for (size_t iCheckpoint = 0; iCheckpoint < _nbCheckpoints; iCheckpoint++)
+	{
+		if (_checkpoints[iCheckpoint].m_distanceToNextCheckpoint > greatestDistance)
+		{
+			greatestDistance = _checkpoints[iCheckpoint].m_distanceToNextCheckpoint;
+			greatestDistanceCheckpoint = &_checkpoints[iCheckpoint];
+		}
+	}
+	if (greatestDistanceCheckpoint != nullptr) greatestDistanceCheckpoint->m_haveGreatestDistance = true;
+}
 
 void Checkpoint::ReceiveInput()
 {
 	cin >> m_position.m_x >> m_position.m_y;
 	cin.ignore();
 }
-
 
 void Checkpoint::CalculateValuesToNextCheckpoint(const Checkpoint& _nextCheckpoint)
 {
@@ -221,46 +242,54 @@ class Pod
 {
 public:
 
-	void ReceiveInput();
+	void ReceiveInput(int _index);
 	inline Vector2 GetPosition() const { return m_position; }
-	void UpdateNextCheckpoint(Checkpoint _checkpoints[]);
+	void UpdateCurrentCheckpoint(Checkpoint _checkpoints[]);
 
 protected:
 
+	int m_index = 0;
 	Vector2 m_position = Vector2::Zero;
 	Vector2 m_speed = Vector2::Zero;
 	float m_angle = 0.0f;
 	bool m_canUseBoost = true;
-
-	int m_nextCheckpointID = 1;
-	Checkpoint* m_nextCheckpoint = nullptr;
-	float m_nextCheckpointAngle = 0.0f;
-	float m_nextCheckpointDistance = 0.0f;
+	int m_currentCheckpointID = 1;
+	Checkpoint* m_currentCheckpoint = nullptr;
+	float m_currentCheckpointAngle = 0.0f;
+	float m_currentCheckpointDistance = 0.0f;
 };
 
-void Pod::ReceiveInput()
+void Pod::ReceiveInput(int _index)
 {
+	m_index = _index;
+
 	cin >> m_position.m_x >> m_position.m_y
 		>> m_speed.m_x >> m_speed.m_y
 		>> m_angle
-		>> m_nextCheckpointID;
-
+		>> m_currentCheckpointID;
 	cin.ignore();
 }
 
-void Pod::UpdateNextCheckpoint(Checkpoint _checkpoints[])
+void Pod::UpdateCurrentCheckpoint(Checkpoint _checkpoints[])
 {
-	m_nextCheckpoint = &_checkpoints[m_nextCheckpointID];
-	cerr << "Next checkpoint index: " << m_nextCheckpointID << endl;
+	m_currentCheckpoint = &_checkpoints[m_currentCheckpointID];
+	cerr << "Checkpoint index: " << m_currentCheckpointID << endl;
 
-	Vector2 nextCheckpointDirection = m_nextCheckpoint->m_position - m_position;
+	Vector2 checkpointDirection = m_currentCheckpoint->m_position - m_position;
+	Vector2 checkpointDirectionNormalized = checkpointDirection.Normalized();
 
-	m_nextCheckpointAngle = 0.0f;
-	m_nextCheckpointAngle = RAD_TO_DEG(acosf(nextCheckpointDirection.Normalized().m_x)) - m_angle;
-	cerr << "Angle to next checkpoint: " << m_nextCheckpointAngle << endl;
+	m_currentCheckpointAngle = RAD_TO_DEG(acosf(checkpointDirectionNormalized.m_x));
+	if (checkpointDirectionNormalized.m_y < 0.0f)
+	{
+		m_currentCheckpointAngle = 360.0f - m_currentCheckpointAngle;
+	}
+	m_currentCheckpointAngle = abs(m_currentCheckpointAngle - m_angle);
 
-	m_nextCheckpointDistance = nextCheckpointDirection.Magnitude();
-	cerr << "Distance to next checkpoint: " << m_nextCheckpointDistance << endl;
+	cerr << "Angle to checkpoint: " << m_currentCheckpointAngle << endl;
+	cerr << "Angle of pod: " << m_angle << endl;
+
+	m_currentCheckpointDistance = checkpointDirection.Magnitude();
+	cerr << "Distance to checkpoint: " << m_currentCheckpointDistance << endl;
 }
 
 #pragma endregion
@@ -316,16 +345,16 @@ void PlayerPod::UpdateThrust()
 	bool isBraking = false;
 
 	// Slow down when the player is turning to the next checkpoint
-	turningMultiplier = (1.0f - m_nextCheckpointAngle / THRUST_ANGLE_BEFORE_TURNING);
+	turningMultiplier = (1.0f - m_currentCheckpointAngle / THRUST_ANGLE_BEFORE_TURNING);
 	turningMultiplier = clamp(turningMultiplier, 0.0f, 1.0f);
 	cerr << "Turning Multiplier : " << turningMultiplier << endl;
-	m_isTurning = turningMultiplier <= 0.80f;
+	m_isTurning = turningMultiplier <= 0.90f;
 
 	// Slow down as the player get closer to the checkpoint.
-	brakingMultiplier = m_nextCheckpointDistance / THRUST_DISTANCE_BEFORE_BRAKING;
+	brakingMultiplier = m_currentCheckpointDistance / THRUST_DISTANCE_BEFORE_BRAKING;
 	brakingMultiplier = clamp(brakingMultiplier, THRUST_MINIMUM_BRACKING_MULTIPLIER, 1.0f);
 	cerr << "Braking Multiplier : " << brakingMultiplier << endl;
-	m_isBraking = brakingMultiplier <= 0.80f;
+	m_isBraking = brakingMultiplier <= 0.90f;
 
 	m_thrust = (int)(newThrust * turningMultiplier * brakingMultiplier);
 	cerr << "Thrust : " << m_thrust << endl;
@@ -338,13 +367,13 @@ void PlayerPod::UpdateTarget()
 	if (isFirstFrame)
 	{
 		isFirstFrame = false;
-		m_target = m_nextCheckpoint->m_position;
+		m_target = m_currentCheckpoint->m_position;
 		return;
 	}
 
 	// Create an offset to the checkpoint position, taking into account of the player speed
 	Vector2 offset = m_speed * -3.0f;
-	m_target = m_nextCheckpoint->m_position + offset;
+	m_target = m_currentCheckpoint->m_position + offset;
 }
 
 void PlayerPod::UpdateHoverText()
@@ -365,6 +394,7 @@ void PlayerPod::UpdateHoverText()
 	{
 		m_hoverText = "ACCELERATING";
 	}
+	m_hoverText = m_hoverText + " TO CP " + std::to_string(m_currentCheckpointID);
 }
 
 void PlayerPod::SendOutput()
@@ -384,10 +414,12 @@ bool PlayerPod::CheckShouldBoost() const
 {
 	if (false == m_canUseBoost) return false;
 
-	bool hasGoodAngleToCheckpoint = m_nextCheckpointAngle < BOOST_THRESHOLD_ANGLE;
+	if (false == m_currentCheckpoint->m_haveGreatestDistance && m_index != 0) return false;
+
+	bool hasGoodAngleToCheckpoint = m_currentCheckpointAngle < BOOST_THRESHOLD_ANGLE;
 	if (false == hasGoodAngleToCheckpoint) return false;
 
-	bool hasGoodDistanceToCheckpoint = m_nextCheckpointDistance > BOOST_THRESHOLD_DISTANCE_TO_CHECKPOINT;
+	bool hasGoodDistanceToCheckpoint = m_currentCheckpointDistance > BOOST_THRESHOLD_DISTANCE_TO_CHECKPOINT;
 	if (false == hasGoodDistanceToCheckpoint) return false;
 
 	for (size_t i = 0; i < POD_NB; i++)
@@ -422,24 +454,27 @@ int main()
 	{
 		checkpoints[iCheckpoint].ReceiveInput();
 		int iPpreviousCheckpoint = iCheckpoint - 1;
-		if (iPpreviousCheckpoint < 0) { iPpreviousCheckpoint = checkpointCount - 1; }
-		checkpoints[iPpreviousCheckpoint].CalculateValuesToNextCheckpoint(checkpoints[iCheckpoint]);
+		if (iCheckpoint > 0) checkpoints[checkpointCount - 1].CalculateValuesToNextCheckpoint(checkpoints[iCheckpoint]);
+		if (iCheckpoint == checkpointCount - 1) checkpoints[iCheckpoint].CalculateValuesToNextCheckpoint(checkpoints[0]);
 	}
+	Checkpoint::CheckGreatestDistance(checkpoints, checkpointCount);
 
 	bool isRunning = true;
 	while (isRunning)
 	{
-
 		for (size_t iPod = 0; iPod < POD_NB; iPod++)
 		{
-			playerPods[iPod].ReceiveInput();
-			opponents[iPod].ReceiveInput();
+			playerPods[iPod].ReceiveInput(iPod);
+		}
+		for (size_t iPod = 0; iPod < POD_NB; iPod++)
+		{
+			opponents[iPod].ReceiveInput(iPod);
 		}
 
 		for (size_t iPod = 0; iPod < POD_NB; iPod++)
 		{
-			cerr << "------- POD " << iPod << " -------" << endl;
-			playerPods[iPod].UpdateNextCheckpoint(checkpoints);
+			cerr << "------- POD 0" << iPod + 1 << " -------" << endl;
+			playerPods[iPod].UpdateCurrentCheckpoint(checkpoints);
 			playerPods[iPod].UpdateTarget();
 			playerPods[iPod].UpdateThrust();
 			playerPods[iPod].UpdateOpponentInteraction(opponents);
