@@ -23,7 +23,7 @@ using namespace std::chrono;
 #define RAD_TO_DEG(angleRad) (angleRad * 180.0 / PI)
 #define LERP(a, b, t) (a * (1.0 - t)) + (b * t);
 
-#define TARGET_DISTANCE 10000.0
+#define TARGET_DISTANCE 1000.0
 
 #define NB_SIMULATED_POD 2
 #define NB_TURN_SIMULATED 4
@@ -48,7 +48,7 @@ using namespace std::chrono;
 
 #define POD_MAX_THRUST 100
 #define POD_COLLIDER_SIZE 400.0
-#define POD_MAXIMUM_ROTATION 8.0
+#define POD_MAXIMUM_ROTATION 18.0
 #define POD_FRICTION 0.85f
 #define POD_BOOST_ACCELERATION 650.0
 #define POD_COLLISION_ACCELERATION 120.0
@@ -270,7 +270,6 @@ class Checkpoint : public Entity
 public:
 
 	void ReceiveInput(int _index);
-	void CalculateValuesToNextCheckpoint(Checkpoint* _nextCheckpoint);
 };
 
 void Checkpoint::ReceiveInput(int _index)
@@ -308,11 +307,12 @@ void Pod::ReceiveInput(int _index)
 	cin >> m_position.m_x >> m_position.m_y >> m_speed.m_x >> m_speed.m_y >> m_angle >> newCheckpointIndex;
 	cin.ignore();
 
+	m_index = _index;
 	m_isControllable = (_index < POD_CONTROLLABLE_NB);
 
 	if (newCheckpointIndex != m_currentCheckpointIndex)
 	{
-		cerr << "Checkpoint passed" << endl;
+		cerr << "Pod " << m_index << " Checkpoint passed" << endl;
 		m_checkpointPassedCount++;
 		m_currentCheckpointIndex = newCheckpointIndex;
 	}
@@ -339,8 +339,8 @@ class Solution
 {
 public:
 
-	static Move GenerateMove(double _amplitude = 1.0); 
-	
+	static Move GenerateMove(double _amplitude = 1.0);
+
 	void ShiftTurn(double _amplitude = 1.0);
 
 	int m_score = -1;
@@ -373,11 +373,9 @@ Move Solution::GenerateMove(double _amplitude)
 	///cerr << "Start to generate a move" << endl;
 
 	// Rotation
-	/*int minimumRotation = move.m_rotation - (int)(ROTATION_CHANGE_BY_MUTATION * _amplitude);
-	int maximumRotation = move.m_rotation + (int)(ROTATION_CHANGE_BY_MUTATION * _amplitude);
-	if (minimumRotation < -POD_MAXIMUM_ROTATION) minimumRotation = -18;
-	if (maximumRotation > POD_MAXIMUM_ROTATION) maximumRotation = 18;
-	move.m_rotation = Random::Range(minimumRotation, maximumRotation);*/
+	int minimumRotation = (int)(-POD_MAXIMUM_ROTATION * _amplitude);
+	int maximumRotation = (int)(POD_MAXIMUM_ROTATION * _amplitude);
+	move.m_rotation = Random::Range(minimumRotation, maximumRotation);
 
 	// Shield
 	/// move.m_useShield = (false == move.m_useShield) && (Random::Range(0, 100) < PROBABILITY_TO_USE_SHIELD);
@@ -420,7 +418,7 @@ class Simulation
 public:
 
 	void InitializeCheckpoints();
-	void ReceivePodsInputs();
+	void ReceivePodsInputs(bool _isFirstTurn = false);
 	void SimulateSolution(const Solution& _solution);
 	void SendOutputFromSolution(const Solution& _solution);
 
@@ -433,9 +431,9 @@ public:
 
 private:
 
-	void SimulateBeforeCollision(const array<Move, POD_CONTROLLABLE_NB> _moves);
-	void SimulateCollision(const array<Move, POD_CONTROLLABLE_NB> _moves);
-	void SimulateAfterCollision(const array<Move, POD_CONTROLLABLE_NB> _moves);
+	void SimulateBeforePhysics(const array<Move, POD_CONTROLLABLE_NB> _moves);
+	void SimulatePhysics(const array<Move, POD_CONTROLLABLE_NB> _moves);
+	void SimulateAfterPhysics(const array<Move, POD_CONTROLLABLE_NB> _moves);
 };
 
 void Simulation::InitializeCheckpoints()
@@ -452,12 +450,23 @@ void Simulation::InitializeCheckpoints()
 	cerr << "Checkpoints Initialized" << endl;
 }
 
-void Simulation::ReceivePodsInputs()
+void Simulation::ReceivePodsInputs(bool _isFirstTurn)
 {
 	for (size_t iPod = 0; iPod < POD_TOTAL_NB; iPod++)
 	{
-		m_pods[iPod].ReceiveInput(iPod);
+		Pod& pod = m_pods[iPod];
+
+		pod.ReceiveInput(iPod);
+
+		if (false == _isFirstTurn) continue;
+
+		// Override the angle for the first turn to face the first checkpoint
+		Vector2 direction = (m_checkpoints[pod.m_currentCheckpointIndex].m_position - pod.m_position).Normalized();
+		float newAngle = acos(direction.m_x) * 180.0 / PI;
+		if (direction.m_y < 0.0) newAngle = (360.0 - newAngle);
+		pod.m_angle = newAngle;
 	}
+
 	///cerr << "Received inputs" << endl;
 }
 
@@ -466,9 +475,9 @@ void Simulation::SimulateSolution(const Solution& _solution)
 	m_tempPods = m_pods; // Copy the initial pods for the new solution
 	for (int iTurn = 0; iTurn < NB_TURN_SIMULATED; iTurn++)
 	{
-		SimulateBeforeCollision(_solution.m_turns[iTurn].m_moves);
-		SimulateCollision(_solution.m_turns[iTurn].m_moves);
-		SimulateAfterCollision(_solution.m_turns[iTurn].m_moves);
+		SimulateBeforePhysics(_solution.m_turns[iTurn].m_moves);
+		SimulatePhysics(_solution.m_turns[iTurn].m_moves);
+		SimulateAfterPhysics(_solution.m_turns[iTurn].m_moves);
 	}
 	///for (int iPod = 0; iPod < NB_SIMULATED_POD; iPod++)
 	///{
@@ -482,50 +491,73 @@ void Simulation::SendOutputFromSolution(const Solution& _solution)
 	{
 		Pod& pod = m_pods[iPod];
 		const Move& move = _solution.m_turns[0].m_moves[iPod];
-		
-		Vector2 target = Vector2::Zero;
-		/*double angle = (pod.m_angle + move.m_rotation) % 360;
+
+		double angle = (pod.m_angle + move.m_rotation) % 360;
 		double angleRad = DEG_TO_RAD(angle);
 		Vector2 direction = Vector2(TARGET_DISTANCE * cos(angleRad), TARGET_DISTANCE * sin(angleRad));
-		target = pod.m_position + direction;*/
-		target = m_checkpoints[pod.m_currentCheckpointIndex].m_position;
+		Vector2 target = pod.m_position + direction;
 
-		cout << target << " " << move.m_thrust << " " << move.m_thrust << endl;
+		string hoverHeadText = " ";
+		if (move.m_useBoost) hoverHeadText += "SHIELD";
+		if (move.m_useBoost) hoverHeadText += "BOOST";
+		else hoverHeadText += "THRUST_" + to_string(move.m_thrust);
+		hoverHeadText += " ANGLE_" + to_string(move.m_rotation);
+
+		cout << target << " " << move.m_thrust << hoverHeadText << endl;
 	}
 }
 
-void Simulation::SimulateBeforeCollision(const array<Move, NB_SIMULATED_POD> _moves)
+void Simulation::SimulateBeforePhysics(const array<Move, NB_SIMULATED_POD> _moves)
 {
 	for (int iPod = 0; iPod < NB_SIMULATED_POD; iPod++)
 	{
 		Pod& pod = m_tempPods[iPod];
 		const Move& move = _moves[iPod];
 
-		//pod.m_angle = (pod.m_angle + move.m_rotation) % 360;
-		//float angleRad = DEG_TO_RAD(pod.m_angle);
-		//Vector2 direction(cos(angleRad), sin(angleRad));
-
-		Vector2 direction = (m_checkpoints[pod.m_currentCheckpointIndex].m_position - pod.m_position).Normalized();
+		pod.m_angle = (pod.m_angle + move.m_rotation) % 360;
+		float angleRad = DEG_TO_RAD(pod.m_angle);
+		Vector2 direction = Vector2(cos(angleRad), sin(angleRad));
 
 		int thrust = move.m_thrust;
-
-		pod.m_speed += direction * (float)thrust;
+		pod.m_speed += direction * (double)thrust;
 	}
 }
 
-void Simulation::SimulateCollision(const array<Move, NB_SIMULATED_POD> _moves)
+void Simulation::SimulatePhysics(const array<Move, NB_SIMULATED_POD> _moves)
 {
+	double time = 0.0;
+	double endTime = 1.0;
+	while (time < endTime)
+	{
+		float deltaTime = endTime - time;
 
+		for (int iPod = 0; iPod < NB_SIMULATED_POD; iPod++)
+		{
+			Pod& pod = m_tempPods[iPod];
+			const Move& move = _moves[iPod];
+
+			pod.m_position += pod.m_speed * deltaTime; // Move the pod
+
+			// Check checkpoints collisions
+			if (Vector2::SquareDistance(pod.m_position, m_checkpoints[pod.m_currentCheckpointIndex].m_position) < (CHECKPOINT_RADIUS * CHECKPOINT_RADIUS))
+			{
+				//cerr << "collision with checkpoint in sumulation" << endl;
+				pod.m_currentCheckpointIndex = (pod.m_currentCheckpointIndex + 1) % m_checkpointCount_Lap;
+				pod.m_checkpointPassedCount++;
+			}
+		}
+
+		time += deltaTime;
+	}
 }
 
-void Simulation::SimulateAfterCollision(const array<Move, NB_SIMULATED_POD> _moves)
+void Simulation::SimulateAfterPhysics(const array<Move, NB_SIMULATED_POD> _moves)
 {
 	for (int iPod = 0; iPod < NB_SIMULATED_POD; iPod++)
 	{
 		Pod& pod = m_tempPods[iPod];
 
 		pod.m_speed *= POD_FRICTION;
-		pod.m_position += pod.m_speed;
 		pod.m_position = Vector2(round(pod.m_position.m_x), round(pod.m_position.m_y));
 
 		/*cerr << "pod position ref " << pod.m_position << endl;
@@ -586,15 +618,17 @@ const Solution& Solver::Solve(double _amplitude)
 	int nbSolutionCreated = 0;
 	int nbSolutionFound = 0;
 
+	int lastScore = -1;
+
 	m_solutions.resize(SOLUTIONS_COUNT);
 	for (size_t iSolution = 0; iSolution < SOLUTIONS_COUNT; iSolution++)
 	{
 		Solution& solution = m_solutions[iSolution];
 		solution.ShiftTurn(_amplitude);
 		m_simulation->SimulateSolution(solution);
+		int currentScore = EvaluateSolution(&solution, *m_simulation);
+		if (currentScore > lastScore) lastScore = currentScore;
 	}
-	sort(m_solutions.begin(), m_solutions.end(), CompareByScore);
-	int lastScore = m_solutions[0].m_score;
 
 	while (timepassed < TIME_ALLOCATED_PER_TURN)
 	{
@@ -668,11 +702,10 @@ int main()
 	{
 		auto startTime = high_resolution_clock::now();
 
-		simulation.ReceivePodsInputs();
+		simulation.ReceivePodsInputs(isFirstTurn);
 		const Solution& solution = solver.Solve(1.0);
 
 		cerr << "Time used for this frame = " << duration_cast<milliseconds>(high_resolution_clock::now() - startTime).count() << endl;
-
 
 		simulation.SendOutputFromSolution(solution);
 		isFirstTurn = false;
