@@ -1,5 +1,14 @@
----------------------- RANG BOIS ET BRONZE VERS OR ----------------------
+COMPTE RENDU
 
+Profil GitHub :
+https://github.com/Snuskasaurus/Coders-Strike-Back
+
+Profil CodinGame :
+https://www.codingame.com/profile/9b0beea058ab2313cf71a078ee92d61d5633634
+
+Rang obtenu : 
+Gold 164 / 6451
+Rang bois et bronze
 J’ai en premier temps, dès le bois, structuré le projet en créant la classe des pods et des checkpoints pour préparer le bronze.
 
 La première mécanique est le boost : Son implémentation a été plutôt simple, j’ai simplement: 
@@ -16,26 +25,24 @@ Le joueur ralentit progressivement quand il tourne vers son prochain checkpoint.
 Le joueur se dirige maintenant vers une nouvelle position qui prend en compte sa vitesse et la position de son prochain checkpoint.
 
 Tout cela m’a fait monter directement en or.
-
----------------------- RANG OR ----------------------
-
+Rang or
 La manière dont sont maintenant géré les inputs m’on fait faire quelques changements. Heureusement, grâce à mon architecture, cela ne m’a pas pris énormément de temps.
 
 Cela m’a permis d'être classé 1519ème sur 6439
 
-J’ai effectué quelques réglages de bugs et quelques ajustements. Le second joueur utilisait maintenant son boost sur le checkpoint qui possédait la plus grande distance tandis que le deuxième boostait dès qu’il le pouvait.
+J’ai effectué quelques réglages de bugs et quelques ajustements. Le second joueur utilise maintenant son boost sur le checkpoint qui possède la plus grande distance tandis que le deuxième boost dès qu’il le peut.
 Cela m’a permis de gagner très peu de places.
 
-Faisant quelques recherches et en analysant mes parties, j’ai compris qu’une approche standard allait me prendre beaucoup de temps et n’allait peut-être même pas fonctionner due à la nature chaotique de la course. J’ai donc décidé d’apprendre à utiliser l'algorithme génétique. 
+Faisant quelques recherches et en analysant mes parties, j’ai compris qu’une approche standard allait me prendre beaucoup de temps et n’allait peut-être même pas fonctionner due à la nature chaotique des courses. J’ai donc décidé d’apprendre à utiliser l'algorithme génétique. 
 
 Cela à été très complexe mais après quelques jours j’ai réussi à implémenter un prototype de cette approche sur la poussée des pods.
 
 J’ai ensuite ajouté un gène pour gérer la rotation des pods, 
 Cela m’a permis d'être classé 270ème sur 6439.
 
-Cependant, je ne simulais pas les collisions entre checkpoints ou entre pods, cela permettait à certains mauvais gènes de pouvoir être gardés.
+Cependant, je ne simule pas les collisions entre checkpoints ou entre pods, et cela engendre certains mauvais gènes de pouvoir être gardés.
 
-En ajoutant les collisions dans la simulation, je me suis rendu compte que le nombre de mutations étaient beaucoup descendu, les gènes étaient donc de "mauvaise qualités”. J’ai donc eu l’idée de renderer idiot mon deuxieme pod. Cela m’a permis de doubler le montant de mutations à chaque frame. J’ai donc rajouté une gêne pour utiliser le boost.
+En ajoutant les collisions dans la simulation, je me suis rendu compte que le nombre de mutations générées avait beaucoup diminué, les gènes étaient alors de "mauvaise qualité”. J’ai donc eu l’idée de rendre idiot mon deuxième pod. Cela m’a permis de doubler le montant de mutations à chaque frame. J’ai donc rajouté une gêne pour utiliser le boost.
 
 Cette dernière milestone m’a donc permis d'être classé 164ème sur 6451 dans la league or.
 Résumé
