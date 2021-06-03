@@ -8,7 +8,9 @@ https://www.codingame.com/profile/9b0beea058ab2313cf71a078ee92d61d5633634
 
 Rang obtenu : 
 Gold 164 / 6451
-Rang bois et bronze
+
+--------------------------------------------- RANG BOIS ET BRONZE --------------------------------------------- 
+
 J’ai en premier temps, dès le bois, structuré le projet en créant la classe des pods et des checkpoints pour préparer le bronze.
 
 La première mécanique est le boost : Son implémentation a été plutôt simple, j’ai simplement: 
@@ -25,7 +27,9 @@ Le joueur ralentit progressivement quand il tourne vers son prochain checkpoint.
 Le joueur se dirige maintenant vers une nouvelle position qui prend en compte sa vitesse et la position de son prochain checkpoint.
 
 Tout cela m’a fait monter directement en or.
-Rang or
+
+--------------------------------------------- RANG OR --------------------------------------------- 
+
 La manière dont sont maintenant géré les inputs m’on fait faire quelques changements. Heureusement, grâce à mon architecture, cela ne m’a pas pris énormément de temps.
 
 Cela m’a permis d'être classé 1519ème sur 6439
